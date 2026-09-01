@@ -27,32 +27,36 @@ Beads Viewer is built for the review moment: open an epic, understand its nested
 
 Beads Viewer uses the installed `bd`; it does not download, pin, upgrade, or downgrade Beads. The current compatibility target includes the repository owner's installed `bd 1.2.1`, while response parsing accepts both legacy raw JSON and the versioned JSON envelope.
 
-## Run from source
+## Install as a local command
+
+Clone the repository once, then link the checkout into your local Node installation. This does not publish or download an npm package:
 
 ```sh
 git clone https://github.com/chase3c/beads-viewer.git
 cd beads-viewer
 pnpm install
-pnpm build
-node dist/cli.js /path/to/a/beads/repository --open
+pnpm install:local
 ```
 
-The repository argument defaults to the current directory:
+After that, open a terminal in any Beads repository and run one command:
 
 ```sh
-cd /path/to/a/beads/repository
-node /path/to/beads-viewer/dist/cli.js --open
+beads-viewer --open
+```
+
+The repository defaults to the current directory. You can also point it at another repository directly:
+
+```sh
+beads-viewer /path/to/a/beads/repository --open
 ```
 
 Choose a port when needed:
 
 ```sh
-node dist/cli.js /path/to/repo --port 4177
+beads-viewer --port 4177 --open
 ```
 
-The server always binds to `127.0.0.1`. With no `--port`, it selects an available port and prints the URL.
-
-The package includes a `beads-viewer` npm bin for future package publication. Once published, the intended commands are `npx beads-viewer . --open` or a global install; the source checkout commands above work today.
+The server always binds to `127.0.0.1`. With no `--port`, it selects an available port and prints the URL. Because the command is symlinked to this checkout, rebuilding after pulling updates is enough; you do not need to link it again.
 
 ## Development
 
