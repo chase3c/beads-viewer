@@ -37,7 +37,13 @@ const index: IndexResponse = {
       status: 'open',
       is_blocked: true,
       labels: ['ui'],
-      dependencies: [],
+      dependencies: [
+        {
+          issue_id: 'repo-task',
+          depends_on_id: 'repo-done',
+          type: 'blocks',
+        },
+      ],
       dependents: [],
     },
     {
@@ -59,8 +65,16 @@ beforeEach(() => {
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      const body = url.startsWith('/api/issues/')
-        ? { issue: { ...index.issues[1], description: 'Complete safe context' } }
+      const issueId = url.startsWith('/api/issues/')
+        ? decodeURIComponent(url.slice('/api/issues/'.length))
+        : undefined;
+      const body = issueId
+        ? {
+            issue: {
+              ...index.issues.find((issue) => issue.id === issueId),
+              description: 'Complete safe context',
+            },
+          }
         : index;
       return { ok: true, status: 200, json: async () => body } as Response;
     }),
@@ -99,10 +113,11 @@ describe('App', () => {
     expect(parent).toHaveAttribute('aria-posinset', '1');
     expect(parent).toHaveAttribute('aria-setsize', '1');
     expect(screen.getByText('3 matches')).toBeInTheDocument();
+    expect(screen.getByRole('treeitem', { name: /Completed sibling/ })).toHaveClass('is-closed');
 
     parent.focus();
     await user.keyboard('{ArrowRight}');
-    expect(screen.getByRole('treeitem', { name: /Completed sibling/ })).toHaveFocus();
+    expect(screen.getByRole('treeitem', { name: /Needle child task/ })).toHaveFocus();
     await user.keyboard('{ArrowLeft}');
     expect(parent).toHaveFocus();
     await user.keyboard('{ArrowLeft}');
@@ -139,6 +154,98 @@ describe('App', () => {
     expect(window.location.pathname).toBe('/');
     expect(replaceState).toHaveBeenCalled();
     await waitFor(() => expect(opener).toHaveFocus());
+  });
+
+  it('shows an epic breakdown and directed dependencies with clickable descendants', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByText('Viewer epic'));
+
+    const overview = await screen.findByRole('region', { name: 'Epic execution overview' });
+    expect(within(overview).getByText('Epic work breakdown')).toBeInTheDocument();
+    expect(within(overview).getByRole('progressbar', { name: 'Epic completion' })).toHaveAttribute(
+      'aria-valuenow',
+      '50',
+    );
+    const breakdown = within(overview).getByRole('list', {
+      name: 'Epic descendant work items',
+    });
+    expect(within(overview).queryByRole('tree')).not.toBeInTheDocument();
+    const workItems = within(breakdown).getAllByRole('listitem');
+    expect(within(workItems[0]).getByText('Hierarchy level 1.')).toHaveClass('sr-only');
+    expect(within(workItems[0]).getByText('Needle child task')).toBeInTheDocument();
+    expect(within(workItems[1]).getByText('Completed sibling')).toBeInTheDocument();
+    expect(within(workItems[1]).getByRole('button')).toHaveClass('is-closed');
+    expect(within(overview).getByText('depends on')).toBeInTheDocument();
+    expect(within(overview).getByText('blocking')).toBeInTheDocument();
+    expect(within(overview).getByText('internal')).toBeInTheDocument();
+    expect(within(overview).queryByText('Parent Child')).not.toBeInTheDocument();
+    expect(within(overview).getByRole('link', { name: /Jump to context/ })).toHaveAttribute(
+      'href',
+      '#issue-context',
+    );
+    expect(document.querySelector('#issue-context')).toHaveAttribute('tabindex', '-1');
+
+    await user.click(within(workItems[0]).getByRole('button', { name: /Needle child task/ }));
+    expect(window.location.pathname).toBe('/issues/repo-task');
+    expect(await screen.findByText('Complete safe context')).toBeInTheDocument();
+  });
+
+  it('shows a clear epic dependency empty state', async () => {
+    const noDependencies = {
+      ...index,
+      issues: index.issues.map((issue) => ({ ...issue, dependencies: [] })),
+    };
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const issueId = url.startsWith('/api/issues/')
+        ? decodeURIComponent(url.slice('/api/issues/'.length))
+        : undefined;
+      const body = issueId
+        ? { issue: noDependencies.issues.find((issue) => issue.id === issueId) }
+        : noDependencies;
+      return { ok: true, status: 200, json: async () => body } as Response;
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByText('Viewer epic'));
+
+    const overview = await screen.findByRole('region', { name: 'Epic execution overview' });
+    expect(
+      within(overview).getByText('No non-parent dependencies connect to this epic.'),
+    ).toBeInTheDocument();
+  });
+
+  it('counts only the overlapping derived blocked signal', async () => {
+    const lifecycleBlocked = {
+      ...index,
+      issues: index.issues.map((issue) =>
+        issue.id === 'repo-done' ? { ...issue, status: 'blocked', is_blocked: false } : issue,
+      ),
+    };
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const issueId = url.startsWith('/api/issues/')
+        ? decodeURIComponent(url.slice('/api/issues/'.length))
+        : undefined;
+      const body = issueId
+        ? { issue: lifecycleBlocked.issues.find((issue) => issue.id === issueId) }
+        : lifecycleBlocked;
+      return { ok: true, status: 200, json: async () => body } as Response;
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByText('Viewer epic'));
+
+    const overview = await screen.findByRole('region', { name: 'Epic execution overview' });
+    expect(within(overview).getByText('Blocked signal').parentElement).toHaveTextContent(
+      'Blocked signal1',
+    );
+    expect(
+      within(overview).getByText(
+        'Blocked signal is derived from active dependencies and can overlap lifecycle statuses.',
+      ),
+    ).toBeInTheDocument();
   });
 
   it('refreshes through the fixed refresh endpoint', async () => {

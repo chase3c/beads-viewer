@@ -16,6 +16,22 @@ export interface Hierarchy {
   cycleIds: Set<string>;
 }
 
+export interface EpicWorkItem {
+  issue: IssueRecord;
+  depth: number;
+}
+
+export interface EpicDependencyEdge {
+  key: string;
+  source: IssueRecord;
+  target: IssueRecord;
+  type: string;
+  kind: 'blocking' | 'nonblocking';
+  scope: 'internal' | 'inbound' | 'outbound';
+}
+
+const BLOCKING_DEPENDENCY_TYPES = new Set(['blocks', 'conditional-blocks', 'waits-for']);
+
 export function buildHierarchy(issues: IssueRecord[]): Hierarchy {
   const issuesById = new Map(issues.map((issue) => [issue.id, issue]));
   const cycleIds = findCycleIds(issuesById);
@@ -38,15 +54,31 @@ export function buildHierarchy(issues: IssueRecord[]): Hierarchy {
     }
   }
 
-  const compare = (left: string, right: string) => {
-    const a = issuesById.get(left)!;
-    const b = issuesById.get(right)!;
-    return (a.priority ?? 99) - (b.priority ?? 99) || a.title.localeCompare(b.title);
-  };
+  const compare = (left: string, right: string) =>
+    compareIssuesByExecution(issuesById.get(left)!, issuesById.get(right)!);
   roots.sort(compare);
   for (const children of childrenById.values()) children.sort(compare);
 
   return { issuesById, childrenById, roots, orphanIds, cycleIds };
+}
+
+export function executionRank(issue: IssueRecord): number {
+  const status = issue.status ?? 'unknown';
+  if (status === 'closed') return 5;
+  if (status === 'deferred') return 4;
+  if (status === 'in_progress') return 0;
+  if (issue.is_blocked === true || status === 'blocked') return 3;
+  if (status === 'open' || status === 'todo' || issue.is_ready === true) return 1;
+  return 2;
+}
+
+export function compareIssuesByExecution(left: IssueRecord, right: IssueRecord): number {
+  return (
+    executionRank(left) - executionRank(right) ||
+    (left.priority ?? 99) - (right.priority ?? 99) ||
+    left.title.localeCompare(right.title) ||
+    left.id.localeCompare(right.id)
+  );
 }
 
 function findCycleIds(issuesById: Map<string, IssueRecord>): Set<string> {
@@ -176,6 +208,78 @@ function dependentTarget(dependency: DependencyRecord, currentIssueId: string): 
     return dependency.depends_on_id;
   }
   return undefined;
+}
+
+export function epicWorkItems(hierarchy: Hierarchy, epicId: string): EpicWorkItem[] {
+  const result: EpicWorkItem[] = [];
+  const roots = hierarchy.childrenById.get(epicId) ?? [];
+  const stack = roots.map((id) => ({ id, depth: 0 })).reverse();
+  const visited = new Set<string>([epicId]);
+
+  while (stack.length) {
+    const current = stack.pop()!;
+    if (visited.has(current.id)) continue;
+    visited.add(current.id);
+    const issue = hierarchy.issuesById.get(current.id);
+    if (!issue) continue;
+    result.push({ issue, depth: current.depth });
+    const children = hierarchy.childrenById.get(current.id) ?? [];
+    for (let index = children.length - 1; index >= 0; index -= 1) {
+      stack.push({ id: children[index], depth: current.depth + 1 });
+    }
+  }
+
+  return result;
+}
+
+export function epicDependencyEdges(hierarchy: Hierarchy, epicId: string): EpicDependencyEdge[] {
+  const workItems = epicWorkItems(hierarchy, epicId);
+  const scopedIds = new Set([epicId, ...workItems.map(({ issue }) => issue.id)]);
+  const edges = new Map<string, EpicDependencyEdge>();
+
+  const add = (source: IssueRecord, target: IssueRecord, type: string) => {
+    if (source.id === target.id || type === 'parent-child') return;
+    const sourceInside = scopedIds.has(source.id);
+    const targetInside = scopedIds.has(target.id);
+    if (!sourceInside && !targetInside) return;
+    const scope = sourceInside ? (targetInside ? 'internal' : 'outbound') : 'inbound';
+    const key = `${source.id}:${type}:${target.id}`;
+    edges.set(key, {
+      key,
+      source,
+      target,
+      type,
+      kind: BLOCKING_DEPENDENCY_TYPES.has(type) ? 'blocking' : 'nonblocking',
+      scope,
+    });
+  };
+
+  for (const source of hierarchy.issuesById.values()) {
+    for (const dependency of source.dependencies) {
+      const targetId = dependencyTarget(dependency);
+      const target = targetId ? hierarchy.issuesById.get(targetId) : undefined;
+      if (target) add(source, target, dependencyType(dependency));
+    }
+  }
+
+  for (const targetId of scopedIds) {
+    const target = hierarchy.issuesById.get(targetId);
+    if (!target) continue;
+    for (const dependent of target.dependents) {
+      const sourceId = dependentTarget(dependent, target.id);
+      const source = sourceId ? hierarchy.issuesById.get(sourceId) : undefined;
+      if (source) add(source, target, dependencyType(dependent));
+    }
+  }
+
+  const scopeRank = { internal: 0, inbound: 1, outbound: 2 };
+  return [...edges.values()].sort(
+    (left, right) =>
+      scopeRank[left.scope] - scopeRank[right.scope] ||
+      compareIssuesByExecution(left.source, right.source) ||
+      compareIssuesByExecution(left.target, right.target) ||
+      left.type.localeCompare(right.type),
+  );
 }
 
 export function ancestorIds(hierarchy: Hierarchy, id: string): string[] {

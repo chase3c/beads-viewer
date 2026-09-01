@@ -12,6 +12,8 @@ import type { IndexResponse, IssueRecord } from '../shared/contracts.js';
 import {
   ancestorIds,
   buildHierarchy,
+  epicDependencyEdges,
+  epicWorkItems,
   issueRelationships,
   matchesFilters,
   visibleIssueIds,
@@ -471,7 +473,7 @@ function TreeRow({
 }) {
   return (
     <div
-      className={`tree-row ${selected ? 'selected' : ''}`}
+      className={`tree-row ${selected ? 'selected' : ''} ${row.issue.status === 'closed' ? 'is-closed' : ''}`}
       role="treeitem"
       aria-selected={selected}
       aria-expanded={row.visibleChildCount ? expanded : undefined}
@@ -613,10 +615,16 @@ function IssueDetail({
         </div>
       )}
 
-      <ContentSection title="Description" content={issue.description} />
-      <ContentSection title="Design & context" content={issue.design} />
-      <ContentSection title="Acceptance criteria" content={issue.acceptance_criteria} />
-      <ContentSection title="Notes & checkpoints" content={issue.notes} />
+      {issue.issue_type === 'epic' && (
+        <EpicExecutionOverview epic={issue} hierarchy={hierarchy} onNavigate={onNavigate} />
+      )}
+
+      <div id="issue-context" className="issue-context" tabIndex={-1}>
+        <ContentSection title="Description" content={issue.description} />
+        <ContentSection title="Design & context" content={issue.design} />
+        <ContentSection title="Acceptance criteria" content={issue.acceptance_criteria} />
+        <ContentSection title="Notes & checkpoints" content={issue.notes} />
+      </div>
 
       {relationships.length > 0 && (
         <section className="detail-section relationships">
@@ -651,6 +659,158 @@ function IssueDetail({
       </section>
     </div>
   );
+}
+
+function EpicExecutionOverview({
+  epic,
+  hierarchy,
+  onNavigate,
+}: {
+  epic: IssueRecord;
+  hierarchy: Hierarchy;
+  onNavigate: (id: string) => void;
+}) {
+  const workItems = epicWorkItems(hierarchy, epic.id);
+  const dependencies = epicDependencyEdges(hierarchy, epic.id);
+  const closedCount = workItems.filter(({ issue }) => issue.status === 'closed').length;
+  const inProgressCount = workItems.filter(({ issue }) => issue.status === 'in_progress').length;
+  const openCount = workItems.filter(({ issue }) =>
+    ['open', 'todo'].includes(issue.status ?? ''),
+  ).length;
+  const blockedCount = workItems.filter(({ issue }) => issue.is_blocked === true).length;
+  const progress = workItems.length ? Math.round((closedCount / workItems.length) * 100) : 0;
+
+  return (
+    <section className="detail-section epic-execution" aria-label="Epic execution overview">
+      <div className="epic-execution-heading">
+        <div>
+          <p className="eyebrow">Execution view</p>
+          <h3>Epic work breakdown</h3>
+        </div>
+        <div className="epic-execution-actions">
+          <strong>{progress}% complete</strong>
+          <a href="#issue-context">Jump to context ↓</a>
+        </div>
+      </div>
+      <div
+        className="epic-progress-track"
+        role="progressbar"
+        aria-label="Epic completion"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={progress}
+      >
+        <span style={{ width: `${progress}%` }} />
+      </div>
+      <div className="epic-summary" aria-label="Epic status counts">
+        <EpicSummaryStat label="Total" value={workItems.length} />
+        <EpicSummaryStat label="In progress" value={inProgressCount} tone="amber" />
+        <EpicSummaryStat label="Open / todo" value={openCount} tone="blue" />
+        <EpicSummaryStat label="Blocked signal" value={blockedCount} tone="rose" />
+        <EpicSummaryStat label="Closed" value={closedCount} tone="green" />
+      </div>
+      <p className="epic-summary-note">
+        Blocked signal is derived from active dependencies and can overlap lifecycle statuses.
+      </p>
+
+      <div className="epic-operational-grid">
+        <section className="epic-subsection" aria-labelledby="epic-work-items-heading">
+          <div className="epic-subsection-heading">
+            <h4 id="epic-work-items-heading">Stories & work items</h4>
+            <span>{workItems.length}</span>
+          </div>
+          {workItems.length ? (
+            <ul className="epic-work-list" aria-label="Epic descendant work items">
+              {workItems.map(({ issue, depth }) => (
+                <li key={issue.id}>
+                  <button
+                    className={`epic-work-row ${issue.status === 'closed' ? 'is-closed' : ''}`}
+                    onClick={() => onNavigate(issue.id)}
+                    style={{ paddingLeft: `${12 + Math.min(depth, 10) * 14}px` }}
+                    title={depth > 10 ? `Hierarchy level ${depth + 1}` : undefined}
+                  >
+                    <span className="sr-only">Hierarchy level {depth + 1}. </span>
+                    <span className="epic-work-identity">
+                      <span>
+                        <TypeBadge type={issue.issue_type} />
+                        <span className="issue-id">{issue.id}</span>
+                      </span>
+                      <strong>{issue.title}</strong>
+                    </span>
+                    <span className="epic-work-meta">
+                      {issue.is_blocked && <span className="blocked-badge">Blocked</span>}
+                      {issue.priority !== undefined && <span>P{issue.priority}</span>}
+                      <StatusBadge status={issue.status} />
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <EpicEmptyState message="This epic has no child stories or work items yet." />
+          )}
+        </section>
+
+        <section className="epic-subsection" aria-labelledby="epic-dependencies-heading">
+          <div className="epic-subsection-heading">
+            <h4 id="epic-dependencies-heading">Dependencies</h4>
+            <span>{dependencies.length}</span>
+          </div>
+          <p className="dependency-note">
+            Internal, inbound, and outbound links are included. Parent-child structure is shown in
+            the work breakdown and omitted here.
+          </p>
+          {dependencies.length ? (
+            <div className="epic-dependency-list" aria-label="Epic dependency relationships">
+              {dependencies.map((dependency) => (
+                <div className="epic-dependency-row" key={dependency.key}>
+                  <div className="dependency-badges">
+                    <span className={`dependency-kind ${dependency.kind}`}>{dependency.kind}</span>
+                    <span className={`dependency-scope ${dependency.scope}`}>
+                      {dependency.scope}
+                    </span>
+                  </div>
+                  <div className="dependency-content">
+                    <button onClick={() => onNavigate(dependency.source.id)}>
+                      <strong>{dependency.source.id}</strong> {dependency.source.title}
+                    </button>
+                    <span>depends on</span>
+                    <button onClick={() => onNavigate(dependency.target.id)}>
+                      <strong>{dependency.target.id}</strong> {dependency.target.title}
+                    </button>
+                    <small>{humanize(dependency.type)}</small>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EpicEmptyState message="No non-parent dependencies connect to this epic." />
+          )}
+        </section>
+      </div>
+    </section>
+  );
+}
+
+function EpicSummaryStat({
+  label,
+  value,
+  tone = 'neutral',
+}: {
+  label: string;
+  value: number;
+  tone?: string;
+}) {
+  return (
+    <div className={tone}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function EpicEmptyState({ message }: { message: string }) {
+  return <p className="epic-empty-state">{message}</p>;
 }
 
 function ContentSection({ title, content }: { title: string; content?: string }) {

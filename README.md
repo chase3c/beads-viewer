@@ -8,7 +8,8 @@ Beads Viewer is built for the review moment: open an epic, understand its nested
 
 ## What it provides
 
-- Epic and work-item overview with status counts
+- Epic execution views with completion counts, clickable nested stories/work items, and readable dependency chains
+- Active-first hierarchy ordering with in-progress/open work prioritized and closed work at the bottom
 - Arbitrary-depth parent/child trees—not assumptions about `epic → story → task`
 - Expand/collapse plus cycle and orphan safeguards
 - Search and status/type/priority/label filters persisted in the URL
