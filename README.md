@@ -41,20 +41,22 @@ pnpm install:local
 After that, open a terminal in any Beads repository and run one command:
 
 ```sh
-beads-viewer --open
+beads-viewer
 ```
 
 The repository defaults to the current directory. You can also point it at another repository directly:
 
 ```sh
-beads-viewer /path/to/a/beads/repository --open
+beads-viewer /path/to/a/beads/repository
 ```
 
 Choose a port when needed:
 
 ```sh
-beads-viewer --port 4177 --open
+beads-viewer --port 4177
 ```
+
+The browser opens automatically. Use `beads-viewer --no-open` when you only want to start the service and print its URL.
 
 The server always binds to `127.0.0.1`. With no `--port`, it selects an available port and prints the URL. Because the command is symlinked to this checkout, rebuilding after pulling updates is enough; you do not need to link it again.
 
