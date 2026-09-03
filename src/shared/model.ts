@@ -30,6 +30,22 @@ export interface EpicDependencyEdge {
   scope: 'internal' | 'inbound' | 'outbound';
 }
 
+export interface EpicDagEdge {
+  key: string;
+  prerequisite: IssueRecord;
+  dependent: IssueRecord;
+  type: string;
+}
+
+export interface EpicDagModel {
+  layers: IssueRecord[][];
+  independent: IssueRecord[];
+  edges: EpicDagEdge[];
+  hasCycle: boolean;
+  cycleIssues: IssueRecord[];
+  cycleBlockedIssues: IssueRecord[];
+}
+
 const BLOCKING_DEPENDENCY_TYPES = new Set(['blocks', 'conditional-blocks', 'waits-for']);
 
 export function buildHierarchy(issues: IssueRecord[]): Hierarchy {
@@ -238,7 +254,8 @@ export function epicDependencyEdges(hierarchy: Hierarchy, epicId: string): EpicD
   const edges = new Map<string, EpicDependencyEdge>();
 
   const add = (source: IssueRecord, target: IssueRecord, type: string) => {
-    if (source.id === target.id || type === 'parent-child') return;
+    if (type === 'parent-child') return;
+    if (source.id === target.id && !BLOCKING_DEPENDENCY_TYPES.has(type)) return;
     const sourceInside = scopedIds.has(source.id);
     const targetInside = scopedIds.has(target.id);
     if (!sourceInside && !targetInside) return;
@@ -280,6 +297,150 @@ export function epicDependencyEdges(hierarchy: Hierarchy, epicId: string): EpicD
       compareIssuesByExecution(left.target, right.target) ||
       left.type.localeCompare(right.type),
   );
+}
+
+export function epicBlockingDag(hierarchy: Hierarchy, epicId: string): EpicDagModel {
+  const workItems = epicWorkItems(hierarchy, epicId).map(({ issue }) => issue);
+  const workIds = new Set(workItems.map((issue) => issue.id));
+  const edges = epicDependencyEdges(hierarchy, epicId)
+    .filter(
+      (edge) =>
+        edge.kind === 'blocking' &&
+        edge.scope === 'internal' &&
+        workIds.has(edge.source.id) &&
+        workIds.has(edge.target.id),
+    )
+    .map((edge) => ({
+      key: edge.key,
+      prerequisite: edge.target,
+      dependent: edge.source,
+      type: edge.type,
+    }));
+
+  const connectedIds = new Set<string>();
+  const outgoing = new Map<string, EpicDagEdge[]>();
+  const indegree = new Map(workItems.map((issue) => [issue.id, 0]));
+  for (const edge of edges) {
+    connectedIds.add(edge.prerequisite.id);
+    connectedIds.add(edge.dependent.id);
+    const current = outgoing.get(edge.prerequisite.id) ?? [];
+    current.push(edge);
+    outgoing.set(edge.prerequisite.id, current);
+    indegree.set(edge.dependent.id, (indegree.get(edge.dependent.id) ?? 0) + 1);
+  }
+
+  const issuesById = new Map(workItems.map((issue) => [issue.id, issue]));
+  const queue = workItems
+    .filter((issue) => connectedIds.has(issue.id) && indegree.get(issue.id) === 0)
+    .sort(compareIssuesByExecution);
+  const layerById = new Map<string, number>();
+  const processed = new Set<string>();
+
+  while (queue.length) {
+    const issue = queue.shift()!;
+    if (processed.has(issue.id)) continue;
+    processed.add(issue.id);
+    const layer = layerById.get(issue.id) ?? 0;
+    for (const edge of outgoing.get(issue.id) ?? []) {
+      layerById.set(edge.dependent.id, Math.max(layerById.get(edge.dependent.id) ?? 0, layer + 1));
+      const nextDegree = (indegree.get(edge.dependent.id) ?? 0) - 1;
+      indegree.set(edge.dependent.id, nextDegree);
+      if (nextDegree === 0) {
+        const dependent = issuesById.get(edge.dependent.id);
+        if (dependent) {
+          queue.push(dependent);
+          queue.sort(compareIssuesByExecution);
+        }
+      }
+    }
+  }
+
+  const unresolvedIds = new Set(
+    workItems
+      .filter((issue) => connectedIds.has(issue.id) && !processed.has(issue.id))
+      .map((issue) => issue.id),
+  );
+  const cycleIds = findDirectedCycleIds(unresolvedIds, edges);
+  const cycleIssues = workItems
+    .filter((issue) => cycleIds.has(issue.id))
+    .sort(compareIssuesByExecution);
+  const cycleBlockedIssues = workItems
+    .filter((issue) => unresolvedIds.has(issue.id) && !cycleIds.has(issue.id))
+    .sort(compareIssuesByExecution);
+  const layers: IssueRecord[][] = [];
+  for (const issue of workItems.filter((item) => processed.has(item.id))) {
+    const layer = layerById.get(issue.id) ?? 0;
+    if (!layers[layer]) layers[layer] = [];
+    layers[layer].push(issue);
+  }
+  for (const layer of layers) layer.sort(compareIssuesByExecution);
+
+  return {
+    layers,
+    independent: workItems
+      .filter((issue) => !connectedIds.has(issue.id))
+      .sort(compareIssuesByExecution),
+    edges,
+    hasCycle: cycleIssues.length > 0,
+    cycleIssues,
+    cycleBlockedIssues,
+  };
+}
+
+function findDirectedCycleIds(nodeIds: Set<string>, edges: EpicDagEdge[]): Set<string> {
+  const adjacency = new Map<string, string[]>();
+  for (const id of nodeIds) adjacency.set(id, []);
+  for (const edge of edges) {
+    if (nodeIds.has(edge.prerequisite.id) && nodeIds.has(edge.dependent.id)) {
+      adjacency.get(edge.prerequisite.id)?.push(edge.dependent.id);
+    }
+  }
+
+  let nextIndex = 0;
+  const indices = new Map<string, number>();
+  const lowLinks = new Map<string, number>();
+  const stack: string[] = [];
+  const onStack = new Set<string>();
+  const cycleIds = new Set<string>();
+
+  const visit = (id: string) => {
+    indices.set(id, nextIndex);
+    lowLinks.set(id, nextIndex);
+    nextIndex += 1;
+    stack.push(id);
+    onStack.add(id);
+
+    for (const adjacentId of adjacency.get(id) ?? []) {
+      if (!indices.has(adjacentId)) {
+        visit(adjacentId);
+        lowLinks.set(id, Math.min(lowLinks.get(id)!, lowLinks.get(adjacentId)!));
+      } else if (onStack.has(adjacentId)) {
+        lowLinks.set(id, Math.min(lowLinks.get(id)!, indices.get(adjacentId)!));
+      }
+    }
+
+    if (lowLinks.get(id) !== indices.get(id)) return;
+    const component: string[] = [];
+    let member: string | undefined;
+    do {
+      member = stack.pop();
+      if (!member) break;
+      onStack.delete(member);
+      component.push(member);
+    } while (member !== id);
+
+    const hasSelfLoop = component.some((memberId) =>
+      (adjacency.get(memberId) ?? []).includes(memberId),
+    );
+    if (component.length > 1 || hasSelfLoop) {
+      component.forEach((memberId) => cycleIds.add(memberId));
+    }
+  };
+
+  for (const id of nodeIds) {
+    if (!indices.has(id)) visit(id);
+  }
+  return cycleIds;
 }
 
 export function ancestorIds(hierarchy: Hierarchy, id: string): string[] {

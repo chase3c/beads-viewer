@@ -3,6 +3,7 @@ import type { IssueRecord } from '../../src/shared/contracts.js';
 import {
   buildHierarchy,
   compareIssuesByExecution,
+  epicBlockingDag,
   epicDependencyEdges,
   epicWorkItems,
   issueRelationships,
@@ -153,6 +154,74 @@ describe('hierarchy model', () => {
         scope: 'outbound',
       },
     ]);
+  });
+
+  it('layers blocking dependencies prerequisite-first and separates independent work', () => {
+    const epic = { ...issue('epic'), issue_type: 'epic' };
+    const prerequisite = { ...issue('first', 'epic'), status: 'closed' };
+    const dependent = { ...issue('second', 'epic'), status: 'open' };
+    dependent.dependencies = [{ depends_on_id: 'first', type: 'blocks' }];
+    const independent = { ...issue('independent', 'epic'), status: 'in_progress' };
+    const hierarchy = buildHierarchy([epic, dependent, independent, prerequisite]);
+
+    const dag = epicBlockingDag(hierarchy, 'epic');
+
+    expect(dag.layers.map((layer) => layer.map((item) => item.id))).toEqual([
+      ['first'],
+      ['second'],
+    ]);
+    expect(dag.edges.map((edge) => [edge.prerequisite.id, edge.dependent.id])).toEqual([
+      ['first', 'second'],
+    ]);
+    expect(dag.independent.map((item) => item.id)).toEqual(['independent']);
+    expect(dag.hasCycle).toBe(false);
+    expect(dag.cycleBlockedIssues).toEqual([]);
+  });
+
+  it('retains blocking edges that use the epic as an endpoint outside the descendant DAG', () => {
+    const epic = { ...issue('epic'), issue_type: 'epic' };
+    const child = issue('child', 'epic');
+    epic.dependencies = [{ depends_on_id: 'child', type: 'blocks' }];
+    const hierarchy = buildHierarchy([epic, child]);
+
+    const dependencies = epicDependencyEdges(hierarchy, 'epic');
+    const dag = epicBlockingDag(hierarchy, 'epic');
+
+    expect(dependencies.map((edge) => edge.key)).toContain('epic:blocks:child');
+    expect(dag.edges).toEqual([]);
+  });
+
+  it('detects blocking cycles and returns a safe fallback set', () => {
+    const epic = { ...issue('epic'), issue_type: 'epic' };
+    const first = issue('first', 'epic');
+    const second = issue('second', 'epic');
+    first.dependencies = [{ depends_on_id: 'second', type: 'blocks' }];
+    second.dependencies = [{ depends_on_id: 'first', type: 'waits-for' }];
+
+    const dag = epicBlockingDag(buildHierarchy([epic, first, second]), 'epic');
+
+    expect(dag.hasCycle).toBe(true);
+    expect(dag.layers).toEqual([]);
+    expect(dag.cycleIssues.map((item) => item.id).sort()).toEqual(['first', 'second']);
+    expect(dag.cycleBlockedIssues).toEqual([]);
+  });
+
+  it('preserves self-loops and distinguishes downstream unresolved work from cycle members', () => {
+    const epic = { ...issue('epic'), issue_type: 'epic' };
+    const loop = issue('loop', 'epic');
+    loop.dependencies = [{ depends_on_id: 'loop', type: 'blocks' }];
+    const downstream = issue('downstream', 'epic');
+    downstream.dependencies = [{ depends_on_id: 'loop', type: 'waits-for' }];
+
+    const dag = epicBlockingDag(buildHierarchy([epic, loop, downstream]), 'epic');
+
+    expect(dag.edges.map((edge) => edge.key)).toEqual([
+      'downstream:waits-for:loop',
+      'loop:blocks:loop',
+    ]);
+    expect(dag.hasCycle).toBe(true);
+    expect(dag.cycleIssues.map((item) => item.id)).toEqual(['loop']);
+    expect(dag.cycleBlockedIssues.map((item) => item.id)).toEqual(['downstream']);
   });
 
   it('combines detail dependents with both inbound dependency projections without duplicates', () => {
