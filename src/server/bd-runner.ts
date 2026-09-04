@@ -49,34 +49,16 @@ export function argsForOperation(operation: BdOperation): string[] {
       return [...prefix, 'context'];
     case 'list': {
       assertMaxRows(operation.maxRows);
-      return [
-        ...prefix,
-        'list',
-        '--all',
-        '--brief',
-        '--flat',
-        '--limit',
-        '0',
-        '--max-rows',
-        String(operation.maxRows),
-      ];
+      return [...prefix, 'list', '--all', '--flat', '--limit', String(operation.maxRows)];
     }
     case 'blocked':
       return [...prefix, 'blocked'];
     case 'ready':
       assertMaxRows(operation.maxRows);
-      return [
-        ...prefix,
-        'ready',
-        '--brief',
-        '--limit',
-        '0',
-        '--max-rows',
-        String(operation.maxRows),
-      ];
+      return [...prefix, 'ready', '--limit', String(operation.maxRows)];
     case 'show':
       if (!isValidIssueId(operation.id)) throw new BdRunnerError('Invalid issue ID', 'invalid');
-      return [...prefix, 'show', `--id=${operation.id}`, '--brief-deps'];
+      return [...prefix, 'show', `--id=${operation.id}`];
   }
 }
 

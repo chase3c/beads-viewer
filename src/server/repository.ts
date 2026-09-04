@@ -51,13 +51,13 @@ export class RepositoryService implements RepositoryReader {
     const versionResult = unwrapBdJson(await this.runner.run({ kind: 'version' }));
     const contextResult = unwrapBdJson(await this.runner.run({ kind: 'context' }));
     const listResult = unwrapBdJson(
-      await this.runner.run({ kind: 'list', maxRows: this.issueCap }),
+      await this.runner.run({ kind: 'list', maxRows: this.issueCap + 1 }),
     );
     const listedIssues = normalizeIssueArray(listResult.data, 'list', this.issueCap);
     const blockedResult = unwrapBdJson(await this.runner.run({ kind: 'blocked' }));
     const blockedIssues = normalizeIssueArray(blockedResult.data, 'blocked', this.issueCap);
     const readyResult = unwrapBdJson(
-      await this.runner.run({ kind: 'ready', maxRows: this.issueCap }),
+      await this.runner.run({ kind: 'ready', maxRows: this.issueCap + 1 }),
     );
     const readyIssues = normalizeIssueArray(readyResult.data, 'ready', this.issueCap);
     const blockedIds = new Set(blockedIssues.map((issue) => issue.id));

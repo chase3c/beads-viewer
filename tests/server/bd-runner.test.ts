@@ -22,11 +22,8 @@ describe('bd command policy', () => {
       '--json',
       'list',
       '--all',
-      '--brief',
       '--flat',
       '--limit',
-      '0',
-      '--max-rows',
       '5000',
     ]);
     expect(argsForOperation({ kind: 'blocked' })).toEqual(['--readonly', '--json', 'blocked']);
@@ -34,10 +31,7 @@ describe('bd command policy', () => {
       '--readonly',
       '--json',
       'ready',
-      '--brief',
       '--limit',
-      '0',
-      '--max-rows',
       '5000',
     ]);
     expect(argsForOperation({ kind: 'show', id: 'agents-31q.2' })).toEqual([
@@ -45,7 +39,6 @@ describe('bd command policy', () => {
       '--json',
       'show',
       '--id=agents-31q.2',
-      '--brief-deps',
     ]);
     expect(() => argsForOperation({ kind: 'show', id: 'x; rm -rf /' })).toThrow('Invalid issue ID');
   });

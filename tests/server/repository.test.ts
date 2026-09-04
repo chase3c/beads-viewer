@@ -4,7 +4,7 @@ import { RepositoryService } from '../../src/server/repository.js';
 
 class FakeRunner {
   run = vi.fn(async (operation: BdOperation): Promise<unknown> => {
-    if (operation.kind === 'version') return { schema_version: 1, data: { version: '1.2.1' } };
+    if (operation.kind === 'version') return { schema_version: 1, data: { version: '1.2.2' } };
     if (operation.kind === 'context') {
       return {
         schema_version: 1,
@@ -36,13 +36,23 @@ describe('RepositoryService', () => {
     const repository = new RepositoryService('/repo', runner);
     const [left, right] = await Promise.all([repository.getIndex(true), repository.getIndex(true)]);
     expect(left).toBe(right);
-    expect(left.diagnostics.bdVersion).toBe('1.2.1');
+    expect(left.diagnostics.bdVersion).toBe('1.2.2');
+    expect(runner.run).toHaveBeenCalledWith({ kind: 'list', maxRows: 5_001 });
+    expect(runner.run).toHaveBeenCalledWith({ kind: 'ready', maxRows: 5_001 });
     expect(left.issues).toEqual([
       expect.objectContaining({ id: 'x-1', is_blocked: true, is_ready: false }),
       expect.objectContaining({ id: 'x-2', is_blocked: false, is_ready: true }),
     ]);
     expect(left.counts).toMatchObject({ blocked: 1, ready: 1 });
     expect(runner.run).toHaveBeenCalledTimes(5);
+  });
+
+  it('rejects a capped list when one extra issue proves the repository exceeds the limit', async () => {
+    const runner = new FakeRunner();
+    const repository = new RepositoryService('/repo', runner, 1);
+
+    await expect(repository.getIndex()).rejects.toMatchObject({ code: 'issue_limit' });
+    expect(runner.run).toHaveBeenCalledWith({ kind: 'list', maxRows: 2 });
   });
 
   it('lets explicit empty detail arrays clear stale cached arrays', async () => {

@@ -28,7 +28,7 @@ Beads Viewer is built for the review moment: open an epic, understand its nested
 - An installed `bd` executable available on `PATH`
 - A repository initialized for Beads
 
-Beads Viewer uses the installed `bd`; it does not download, pin, upgrade, or downgrade Beads. The current compatibility target includes the repository owner's installed `bd 1.2.1`, while response parsing accepts both legacy raw JSON and the versioned JSON envelope.
+Beads Viewer uses the installed `bd`; it does not download, pin, upgrade, or downgrade Beads. The current compatibility target is stable `bd 1.2.2`, while response parsing accepts both legacy raw JSON and the versioned JSON envelope. Retracted `bd 1.2.1` also works, but should be upgraded using the upstream recovery guidance.
 
 ## Install as a local command
 
@@ -91,7 +91,7 @@ The service has a deliberately small boundary:
 
 - The repository path is accepted only as a startup argument, canonicalized once, and used as the `cwd` for `bd`.
 - The browser cannot submit a filesystem path, command, subcommand, executable, or arbitrary flags.
-- The adapter has six fixed operations: version, context, complete brief list, derived blocked and ready views, and one issue detail.
+- The adapter has six fixed operations: version, context, bounded complete list, derived blocked and ready views, and one issue detail.
 - Every operation is constructed internally with `bd --readonly --json` and `BD_JSON_ENVELOPE=1`.
 - `BEADS_DB` is removed from child environments so it cannot override normal workspace discovery.
 - Commands use argument arrays with `shell: false`, execute serially, and have queue/time/output/issue limits.
@@ -115,7 +115,7 @@ browser (React/Vite)
                  cwd = canonical startup repository
 ```
 
-The index uses `list --all --brief --flat` so closed children remain visible without loading large prose fields, then annotates those records by ID from the fixed `blocked` and `ready` views so derived work state is accurate. Full issue context is fetched lazily with `show --brief-deps`.
+The index uses bounded `list --all --flat` output so closed children remain visible on stable Beads releases, then annotates those records by ID from the fixed `blocked` and `ready` views so derived work state is accurate. Full issue context is fetched lazily with `show`. The viewer deliberately avoids the `--brief`, `--brief-deps`, and `--max-rows` flags that appeared in the retracted Beads 1.2.1 release but are absent from the stable 1.2.2 recovery release.
 
 ## License
 
