@@ -19,7 +19,7 @@ Beads Viewer is built for the review moment: open an epic, understand its nested
 - Deep-linked issue details with breadcrumbs, including focus-managed child dialogs that stay inside the epic context
 - Description, design, acceptance criteria, notes, labels, lifecycle metadata, and relationships
 - Responsive light/dark interface with accessible tree keyboard navigation, a focus-managed mobile detail dialog, and error/empty/loading states
-- Manual refresh against the live local Beads workspace
+- Browser reloads always refresh from the live local Beads workspace
 
 ## Requirements
 

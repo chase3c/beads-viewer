@@ -521,13 +521,15 @@ describe('App', () => {
     expect(window.location.pathname).toBe('/issues/repo-task');
   });
 
-  it('refreshes through the fixed refresh endpoint', async () => {
-    const user = userEvent.setup();
+  it('bypasses the server cache on every browser load, including focused epic routes', async () => {
+    window.history.replaceState({}, '', '/epics/repo-epic');
+
     render(<App />);
-    await screen.findByText('Viewer epic');
-    await user.click(screen.getByRole('button', { name: 'Refresh' }));
-    await waitFor(() =>
-      expect(fetch).toHaveBeenCalledWith('/api/index?refresh=1', expect.anything()),
-    );
+
+    expect(
+      await screen.findByRole('heading', { name: 'Viewer epic', level: 1 }),
+    ).toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledWith('/api/index?refresh=1', expect.anything());
+    expect(screen.queryByRole('button', { name: 'Refresh' })).not.toBeInTheDocument();
   });
 });

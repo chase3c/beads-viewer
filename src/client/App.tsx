@@ -37,7 +37,6 @@ const EMPTY_FILTERS: FilterState = { query: '', status: '', type: '', priority: 
 export function App() {
   const [index, setIndex] = useState<IndexResponse>();
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string>();
   const [filters, setFilters] = useState(readFilters);
   const [route, setRoute] = useState<ViewerRoute>(readRoute);
@@ -54,12 +53,11 @@ export function App() {
   const selectedId = route.kind === 'general' ? route.issueId : undefined;
   const hadSelectionRef = useRef(Boolean(selectedId));
 
-  const load = async (refresh = false) => {
-    if (refresh) setRefreshing(true);
-    else setLoading(true);
+  const load = async () => {
+    setLoading(true);
     setError(undefined);
     try {
-      const result = await getIndex(refresh);
+      const result = await getIndex(true);
       setIndex(result);
       setExpanded((current) =>
         current.size
@@ -70,7 +68,6 @@ export function App() {
       setError(loadError instanceof Error ? loadError.message : 'Unable to load Beads data');
     } finally {
       setLoading(false);
-      setRefreshing(false);
     }
   };
 
@@ -291,9 +288,6 @@ export function App() {
           <span className="safety-pill" title="Every issue-data command includes bd --readonly">
             <span aria-hidden="true">◉</span> Read-only commands
           </span>
-          <button className="button" onClick={() => void load(true)} disabled={refreshing}>
-            {refreshing ? 'Refreshing…' : 'Refresh'}
-          </button>
         </div>
       </header>
 
